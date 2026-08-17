@@ -16,17 +16,22 @@ int ub_detect_unbreak(const char *in, char *out, size_t max_len) {
         if ((in[i] == '\r' && in[i+1] == '\n') || in[i] == '\n') {
             int step = (in[i] == '\r') ? 2 : 1;
 
+            // 1. Перенос слова через дефис (метри- / ками)
             if (out_idx > 0 && out[out_idx - 1] == '-') {
-                out_idx--;
+                out_idx--; // удаляем дефис
                 i += step;
                 modified = 1;
                 continue;
             }
+
+            // 2. Конец предложения (точка, знак вопроса и т.д.) — сохраняем перенос
             if (out_idx > 0 && strchr(".!?:;", out[out_idx - 1])) {
                 out[out_idx++] = '\n';
                 i += step;
                 continue;
             }
+
+            // 3. Обычный разрыв строки посреди предложения — меняем на пробел
             if (out_idx > 0 && out[out_idx - 1] != ' ') {
                 out[out_idx++] = ' ';
                 modified = 1;
@@ -35,6 +40,7 @@ int ub_detect_unbreak(const char *in, char *out, size_t max_len) {
             continue;
         }
 
+        // Удаление двойных пробелов
         if (in[i] == ' ' && out_idx > 0 && out[out_idx - 1] == ' ') {
             i++;
             modified = 1;

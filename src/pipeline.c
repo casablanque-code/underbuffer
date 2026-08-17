@@ -1,36 +1,54 @@
-#include "detector.h"
+#include <stdio.h>
 #include <stdlib.h>
-#include <wchar.h>
+#include <string.h>
+#include <windows.h>
+#include <detector.h>
 
-/* Реализации живут в detector_url.c / detector_json.c / detector_unbreak.c.
- * Base64/URL-decode детектор сознательно исключён из MVP: авто-декодинг
- * произвольных base64-подобных строк слишком легко ломает то, что
- * пользователь скопировал намеренно "как есть" (токены, пароли, ключи).
- * Если понадобится — добавляется отдельным opt-in детектором, никогда
- * не в состав пайплайна по умолчанию. */
-WCHAR *ub_detect_url(const WCHAR *input);
-WCHAR *ub_detect_json(const WCHAR *input);
-WCHAR *ub_detect_unbreak(const WCHAR *input);
+// Явные прототипы детекторов на случай отсутствия их в detector.h
+int ub_detect_unbreak(const char *in, char *out, size_t max_len);
+int ub_detect_url(const char *in, char *out, size_t max_len);
+int ub_detect_json(const char *in, char *out, size_t max_len);
 
-const ub_detector_t UB_SYNC_PIPELINE[] = {
-    { "unbreak", ub_detect_unbreak }, /* сначала склеиваем рваные строки */
-    { "json",    ub_detect_json    }, /* затем пробуем распознать JSON   */
-    { "url",     ub_detect_url     }, /* и только затем — чистка URL     */
-};
-const size_t UB_SYNC_PIPELINE_COUNT = sizeof(UB_SYNC_PIPELINE) / sizeof(UB_SYNC_PIPELINE[0]);
+WCHAR *ub_pipeline_run_sync(const WCHAR *input) {
+    if (!input) return NULL;
 
-WCHAR *ub_pipeline_run_sync(const WCHAR *input)
-{
-    WCHAR *current = _wcsdup(input);
-    if (!current) return NULL;
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, input, -1, NULL, 0, NULL, NULL);
+    if (utf8_len <= 0) return NULL;
 
-    for (size_t i = 0; i < UB_SYNC_PIPELINE_COUNT; i++) {
-        WCHAR *next = UB_SYNC_PIPELINE[i].run(current);
-        if (next != NULL) {
-            free(current);
-            current = next;
-        }
-        /* next == NULL: детектор не применился, current остаётся как есть */
+    size_t buf_size = (size_t)utf8_len * 4 + 4096;
+    char *buf_a = (char *)malloc(buf_size);
+    char *buf_b = (char *)malloc(buf_size);
+    if (!buf_a || !buf_b) {
+        free(buf_a);
+        free(buf_b);
+        return NULL;
     }
-    return current;
+
+    WideCharToMultiByte(CP_UTF8, 0, input, -1, buf_a, (int)buf_size, NULL, NULL);
+
+    // 1. Unbreak (склейка переносов)
+    if (ub_detect_unbreak(buf_a, buf_b, buf_size)) {
+        strcpy(buf_a, buf_b);
+    }
+
+    // 2. URL Cleaning (очистка ссылок)
+    if (ub_detect_url(buf_a, buf_b, buf_size)) {
+        strcpy(buf_a, buf_b);
+    }
+
+    // 3. JSON Formatting
+    if (ub_detect_json(buf_a, buf_b, buf_size)) {
+        strcpy(buf_a, buf_b);
+    }
+
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, buf_a, -1, NULL, 0);
+    WCHAR *result = (WCHAR *)malloc(wide_len * sizeof(WCHAR));
+    if (result) {
+        MultiByteToWideChar(CP_UTF8, 0, buf_a, -1, result, wide_len);
+    }
+
+    free(buf_a);
+    free(buf_b);
+
+    return result;
 }

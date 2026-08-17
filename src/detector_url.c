@@ -22,6 +22,13 @@ static void clean_single_url(char *url) {
     strncpy(base, url, base_len);
     base[base_len] = '\0';
 
+    char *hash_mark = strchr(q, '#');
+    char fragment[512] = {0};
+    if (hash_mark) {
+        snprintf(fragment, sizeof(fragment), "%s", hash_mark);
+        *hash_mark = '\0';
+    }
+
     char query[2048];
     snprintf(query, sizeof(query), "%s", q + 1);
 
@@ -36,58 +43,65 @@ static void clean_single_url(char *url) {
     }
 
     if (clean_query[0] != '\0') {
-        snprintf(url, 2048, "%s?%s", base, clean_query);
+        snprintf(url, 2048, "%s?%s%s", base, clean_query, fragment);
     } else {
-        snprintf(url, 2048, "%s", base);
+        snprintf(url, 2048, "%s%s", base, fragment);
     }
 }
 
 int ub_detect_url(const char *in, char *out, size_t max_len) {
     if (!in || !out || max_len == 0) return 0;
 
-    char temp[4096];
-    strncpy(temp, in, sizeof(temp) - 1);
-    temp[sizeof(temp) - 1] = '\0';
+    char current[4096];
+    strncpy(current, in, sizeof(current) - 1);
+    current[sizeof(current) - 1] = '\0';
 
-    char normalized[4096] = {0};
-    size_t n_idx = 0;
-    for (size_t i = 0; temp[i] != '\0' && n_idx < sizeof(normalized) - 1; i++) {
-        if (strncmp(&temp[i], "https: //", 9) == 0) {
-            strcat(normalized, "https://");
-            n_idx += 8;
-            i += 8;
-            continue;
-        }
-        if (strncmp(&temp[i], "http: //", 8) == 0) {
-            strcat(normalized, "http://");
-            n_idx += 7;
-            i += 7;
-            continue;
-        }
-        normalized[n_idx++] = temp[i];
-    }
-    normalized[n_idx] = '\0';
+    int modified = 0;
 
-    char *url_start = strstr(normalized, "http://");
-    if (!url_start) url_start = strstr(normalized, "https://");
+    while (1) {
+        char *url_start = strstr(current, "http://");
+        if (!url_start) url_start = strstr(current, "https://");
+        if (!url_start) break;
 
-    if (url_start) {
-        char url_buf[2048];
+        // Ищем конец URL
         size_t len = 0;
         while (url_start[len] != '\0' && !strchr(" \t\r\n)]>\"'", url_start[len])) {
             len++;
         }
+
+        char url_buf[2048];
+        if (len >= sizeof(url_buf)) break;
         strncpy(url_buf, url_start, len);
         url_buf[len] = '\0';
 
+        char orig_url[2048];
+        strcpy(orig_url, url_buf);
+
         clean_single_url(url_buf);
 
-        size_t prefix_len = url_start - normalized;
-        snprintf(out, max_len, "%.*s%s%s", (int)prefix_len, normalized, url_buf, url_start + len);
-        return (strcmp(in, out) != 0);
+        if (strcmp(orig_url, url_buf) != 0) {
+            char next_buf[4096];
+            size_t prefix_len = url_start - current;
+            snprintf(next_buf, sizeof(next_buf), "%.*s%s%s", (int)prefix_len, current, url_buf, url_start + len);
+            strncpy(current, next_buf, sizeof(current) - 1);
+            current[sizeof(current) - 1] = '\0';
+            modified = 1;
+        } else {
+            // Если URL не изменился, ищем следующий за ним
+            char *next_search = url_start + len;
+            if (*next_search == '\0') break;
+            // Временно заменяем обработанную схему, чтобы strstr не зацикливался
+            url_start[0] = 'H'; 
+        }
     }
 
-    strncpy(out, in, max_len - 1);
+    // Возвращаем 'http' / 'https' на место, если меняли временно
+    for (size_t i = 0; current[i] != '\0'; i++) {
+        if (strncmp(&current[i], "Http://", 7) == 0) current[i] = 'h';
+        if (strncmp(&current[i], "Https://", 8) == 0) current[i] = 'h';
+    }
+
+    strncpy(out, current, max_len - 1);
     out[max_len - 1] = '\0';
-    return 0;
+    return modified;
 }
