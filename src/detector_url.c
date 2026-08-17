@@ -3,16 +3,15 @@
 #include <wchar.h>
 
 /*
- * ВАЖНО (MVP-решение): этот детектор делает ТОЛЬКО синхронную,
- * оффлайн нормализацию — вырезает трекинговые параметры из query
- * string. Никаких сетевых запросов здесь нет и не будет: HEAD-проверка
- * доступности ссылки живёт отдельно в netcheck.c и вызывается только
- * из async-стадии (см. main.c), никогда из этого пайплайна. Так
- * WM_CLIPBOARDUPDATE обработчик никогда не блокируется на сети.
+ * IMPORTANT (MVP scope): this detector only does synchronous, offline
+ * normalization — stripping tracker query params. No network calls here,
+ * ever. The HEAD-check for link availability lives separately in
+ * netcheck.c and is only invoked from the async stage (see main.c), so
+ * the WM_CLIPBOARDUPDATE handler never blocks on the network.
  */
 
-/* Известные трекинговые параметры, которые вырезаем целиком.
- * Сравнение по префиксу имени параметра (до '=' или до конца). */
+/* Known tracker params, stripped entirely. Matched by name prefix
+ * (up to '=' or end of key). */
 static const WCHAR *TRACKER_PARAM_PREFIXES[] = {
     L"utm_",       /* utm_source, utm_medium, utm_campaign, ... */
     L"fbclid",
@@ -39,7 +38,7 @@ static BOOL is_tracker_param(const WCHAR *key, size_t key_len)
     for (size_t i = 0; i < TRACKER_PARAM_COUNT; i++) {
         size_t plen = wcslen(TRACKER_PARAM_PREFIXES[i]);
         if (plen <= key_len && _wcsnicmp(key, TRACKER_PARAM_PREFIXES[i], plen) == 0) {
-            /* либо точное совпадение, либо совпадение как префикс (utm_*) */
+            /* Either exact match, or prefix match ending in '_' (utm_*). */
             if (plen == key_len || TRACKER_PARAM_PREFIXES[i][plen - 1] == L'_') {
                 return TRUE;
             }
@@ -48,8 +47,8 @@ static BOOL is_tracker_param(const WCHAR *key, size_t key_len)
     return FALSE;
 }
 
-/* Находит первое вхождение "http://" или "https://" в строке.
- * Возвращает NULL, если ссылок нет — тогда детектор не применяется. */
+/* Finds the first "http://" or "https://" occurrence in the string.
+ * Returns NULL if there's no URL — the detector then doesn't apply. */
 static const WCHAR *find_url_start(const WCHAR *s)
 {
     const WCHAR *p1 = wcsstr(s, L"http://");
@@ -58,12 +57,29 @@ static const WCHAR *find_url_start(const WCHAR *s)
     return p1 ? p1 : p2;
 }
 
-/* Конец URL — первый пробельный/переносной символ или конец строки. */
+/* End of the URL: first whitespace/newline char, or end of string. */
 static const WCHAR *find_url_end(const WCHAR *start)
 {
     const WCHAR *p = start;
     while (*p && *p != L' ' && *p != L'\t' && *p != L'\r' && *p != L'\n') {
         p++;
+    }
+
+    /* Trim trailing punctuation that's almost always wrapping around the
+     * URL rather than part of it: "(url)", "url.", "url,", markdown
+     * "[text](url)", etc. Without this the punctuation ends up inside
+     * the query string and gets mangled when a tracker param at the end
+     * is stripped (the closing bracket goes with it). Peel one char at
+     * a time — this also covers compound cases like "url).". */
+    while (p > start) {
+        WCHAR last = *(p - 1);
+        if (last == L')' || last == L']' || last == L'}' || last == L'>' ||
+            last == L'"' || last == L'\'' || last == L'.' || last == L',' ||
+            last == L';' || last == L':' || last == L'!' || last == L'?') {
+            p--;
+        } else {
+            break;
+        }
     }
     return p;
 }
@@ -75,7 +91,7 @@ static WCHAR *strip_trackers(const WCHAR *url, const WCHAR *url_end)
         if (*p == L'?') { query = p; break; }
     }
     if (!query) {
-        return NULL; /* нет query string — нечего чистить */
+        return NULL; /* no query string — nothing to strip */
     }
 
     size_t base_len = (size_t)(query - url);
@@ -109,23 +125,63 @@ static WCHAR *strip_trackers(const WCHAR *url, const WCHAR *url_end)
 
 WCHAR *ub_detect_url(const WCHAR *input)
 {
-    const WCHAR *url_start = find_url_start(input);
-    if (!url_start) return NULL;
+    /*
+     * Scans the whole buffer and strips trackers from EVERY http(s) URL
+     * it finds, no matter what surrounds it (a bare link, a caption, a
+     * markdown wrapper like "[text](url)", etc). Everything that isn't
+     * part of a URL (prefix/suffix/text between links) is copied to the
+     * output byte-for-byte — the detector only touches the query string
+     * inside the URLs it finds, so the risk of mangling surrounding text
+     * is minimal.
+     *
+     * strip_trackers only REMOVES characters, never adds — so the result
+     * is guaranteed to be no longer than the input, and the output
+     * buffer can be allocated once, no realloc needed.
+     */
+    size_t len = wcslen(input);
+    if (len == 0) return NULL;
 
-    /* MVP сознательно обрабатывает только случай "буфер = ровно один URL
-     * (возможно с пробелами вокруг)". Ссылки внутри произвольного текста
-     * можно добавить позже отдельным, явно включаемым режимом — трогать
-     * произвольный текст автоматически рискованно (см. договорённость
-     * про risky heuristics). */
-    const WCHAR *p = input;
-    while (*p == L' ' || *p == L'\t' || *p == L'\r' || *p == L'\n') p++;
-    if (p != url_start) return NULL;
+    WCHAR *out = (WCHAR *)malloc((len + 1) * sizeof(WCHAR));
+    if (!out) return NULL;
+    size_t out_len = 0;
+    BOOL changed = FALSE;
 
-    const WCHAR *url_end = find_url_end(url_start);
-    const WCHAR *q = url_end;
-    while (*q == L' ' || *q == L'\t' || *q == L'\r' || *q == L'\n') q++;
-    if (*q != L'\0') return NULL; /* после URL есть что-то ещё — не трогаем */
+    const WCHAR *cursor = input;
+    while (*cursor) {
+        const WCHAR *url_start = find_url_start(cursor);
+        if (!url_start) {
+            size_t rest = wcslen(cursor);
+            memcpy(out + out_len, cursor, rest * sizeof(WCHAR));
+            out_len += rest;
+            break;
+        }
 
-    WCHAR *cleaned = strip_trackers(url_start, url_end);
-    return cleaned; /* NULL, если чистить было нечего */
+        size_t prefix_len = (size_t)(url_start - cursor);
+        memcpy(out + out_len, cursor, prefix_len * sizeof(WCHAR));
+        out_len += prefix_len;
+
+        const WCHAR *url_end = find_url_end(url_start);
+        WCHAR *cleaned = strip_trackers(url_start, url_end);
+        if (cleaned) {
+            size_t clean_len = wcslen(cleaned);
+            memcpy(out + out_len, cleaned, clean_len * sizeof(WCHAR));
+            out_len += clean_len;
+            free(cleaned);
+            changed = TRUE;
+        } else {
+            size_t raw_len = (size_t)(url_end - url_start);
+            memcpy(out + out_len, url_start, raw_len * sizeof(WCHAR));
+            out_len += raw_len;
+        }
+
+        cursor = url_end;
+    }
+
+    out[out_len] = L'\0';
+
+    if (!changed) {
+        free(out);
+        return NULL;
+    }
+    return out;
 }
