@@ -212,6 +212,41 @@ static void test_unbreak_cyrillic_glues_without_locale(void)
     free(r);
 }
 
+static void test_unbreak_crlf_single_glues_with_space(void)
+{
+    /* Regression: real Windows clipboard text is CRLF, not bare \n.
+     * The old code only recognized \n -- \r fell through as an
+     * ordinary character, breaking the before/after lookup on every
+     * single line ending and silently disabling the whole detector
+     * on real clipboard input. */
+    WCHAR *r = ub_detect_unbreak(L"word\r\nword");
+    check_eq("unbreak: CRLF between words -> space", r, L"word word");
+    free(r);
+}
+
+static void test_unbreak_crlf_hyphen_wordbreak(void)
+{
+    WCHAR *r = ub_detect_unbreak(L"exam-\r\nple");
+    check_eq("unbreak: CRLF hyphenated word wrap gets glued", r, L"example");
+    free(r);
+}
+
+static void test_unbreak_crlf_double_preserved(void)
+{
+    WCHAR *r = ub_detect_unbreak(L"word\r\n\r\nword\r\nword");
+    check_eq("unbreak: CRLF CRLF (paragraph boundary) kept, single CRLF glued",
+             r, L"word\r\n\r\nword word");
+    free(r);
+}
+
+static void test_unbreak_crlf_cyrillic(void)
+{
+    WCHAR *r = ub_detect_unbreak(L"\u042d\u0442\u043e \u0431\u044b\u043b \u0438\u043d\u0442\u0435\u0440\u0435\u0441-\r\n\u043d\u044b\u0439 \u044d\u043a\u0441\u043f\u0435\u0440\u0438\u043c\u0435\u043d\u0442.");
+    check_eq("unbreak: CRLF hyphen-break on Cyrillic text",
+             r, L"\u042d\u0442\u043e \u0431\u044b\u043b \u0438\u043d\u0442\u0435\u0440\u0435\u0441\u043d\u044b\u0439 \u044d\u043a\u0441\u043f\u0435\u0440\u0438\u043c\u0435\u043d\u0442.");
+    free(r);
+}
+
 /* ---- pipeline (integration) ---- */
 
 static void test_pipeline_json_passthrough(void)
@@ -264,6 +299,10 @@ int main(void)
     test_unbreak_multi_spaces_collapse();
     test_unbreak_no_single_newline_untouched();
     test_unbreak_cyrillic_glues_without_locale();
+    test_unbreak_crlf_single_glues_with_space();
+    test_unbreak_crlf_hyphen_wordbreak();
+    test_unbreak_crlf_double_preserved();
+    test_unbreak_crlf_cyrillic();
 
     test_pipeline_json_passthrough();
     test_pipeline_wrapped_url_with_softwrap();

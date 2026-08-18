@@ -22,20 +22,28 @@ static BOOL is_word_char(WCHAR c)
     }
 }
 
+/* A newline event is "\n" or "\r\n" -- Windows clipboard text is
+ * conventionally CRLF, and the whole point of this detector breaks
+ * if "\r" isn't treated as part of the line ending. Returns the
+ * event length (1 or 2), or 0 if there's no newline at pos. */
+static size_t newline_len(const WCHAR *s, size_t pos, size_t len)
+{
+    if (pos >= len) return 0;
+    if (s[pos] == L'\n') return 1;
+    if (s[pos] == L'\r' && pos + 1 < len && s[pos + 1] == L'\n') return 2;
+    return 0;
+}
+
 WCHAR *ub_detect_unbreak(const WCHAR *input)
 {
     size_t len = wcslen(input);
     if (len == 0) return NULL;
 
-    BOOL has_single_newline = FALSE;
+    BOOL has_newline = FALSE;
     for (size_t i = 0; i < len; i++) {
-        if (input[i] == L'\n') {
-            BOOL prev_nl = (i > 0 && input[i - 1] == L'\n');
-            BOOL next_nl = (i + 1 < len && input[i + 1] == L'\n');
-            if (!prev_nl && !next_nl) { has_single_newline = TRUE; break; }
-        }
+        if (input[i] == L'\n') { has_newline = TRUE; break; }
     }
-    if (!has_single_newline) return NULL;
+    if (!has_newline) return NULL;
 
     WCHAR *out = (WCHAR *)malloc((len + 1) * sizeof(WCHAR));
     if (!out) return NULL;
@@ -44,25 +52,29 @@ WCHAR *ub_detect_unbreak(const WCHAR *input)
 
     size_t i = 0;
     while (i < len) {
-        WCHAR c = input[i];
+        size_t nl_span = newline_len(input, i, len);
 
-        if (c == L'\n') {
-            BOOL prev_nl = (i > 0 && input[i - 1] == L'\n');
-            BOOL next_nl = (i + 1 < len && input[i + 1] == L'\n');
-            if (prev_nl || next_nl) {
-                out[out_len++] = c;
-                i++;
+        if (nl_span > 0) {
+            size_t event_end = i + nl_span;
+            BOOL next_is_nl = newline_len(input, event_end, len) > 0;
+            BOOL prev_is_nl = (out_len > 0 && out[out_len - 1] == L'\n');
+
+            if (prev_is_nl || next_is_nl) {
+                memcpy(out + out_len, input + i, nl_span * sizeof(WCHAR));
+                out_len += nl_span;
+                i = event_end;
                 continue;
             }
 
             size_t before_idx = out_len;
             while (before_idx > 0 && out[before_idx - 1] == L' ') before_idx--;
             WCHAR before = (before_idx > 0) ? out[before_idx - 1] : L'\0';
-            WCHAR after = (i + 1 < len) ? input[i + 1] : L'\0';
+            WCHAR after = (event_end < len) ? input[event_end] : L'\0';
 
             if (after == L'-' || after == L'*' || (after >= L'0' && after <= L'9')) {
-                out[out_len++] = c;
-                i++;
+                memcpy(out + out_len, input + i, nl_span * sizeof(WCHAR));
+                out_len += nl_span;
+                i = event_end;
                 continue;
             }
 
@@ -70,7 +82,7 @@ WCHAR *ub_detect_unbreak(const WCHAR *input)
                 before_idx > 1 && is_word_char(out[before_idx - 2])) {
                 out_len = before_idx - 1;
                 changed = TRUE;
-                i++;
+                i = event_end;
                 continue;
             }
 
@@ -78,15 +90,17 @@ WCHAR *ub_detect_unbreak(const WCHAR *input)
                 out_len = before_idx;
                 out[out_len++] = L' ';
                 changed = TRUE;
-                i++;
+                i = event_end;
                 continue;
             }
 
-            out[out_len++] = c;
-            i++;
+            memcpy(out + out_len, input + i, nl_span * sizeof(WCHAR));
+            out_len += nl_span;
+            i = event_end;
             continue;
         }
 
+        WCHAR c = input[i];
         if (c == L' ' || c == L'\t') {
             if (out_len > 0 && out[out_len - 1] == L' ') {
                 changed = TRUE;

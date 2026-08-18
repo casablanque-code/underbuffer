@@ -72,7 +72,7 @@ static void fill_random_input(WCHAR *buf, size_t len)
 {
     static const WCHAR POOL[] =
         L"abc def-\nghi \n\n jkl {\"x\":1} https://a.b/?utm_source=z&id=2 "
-        L"\x421\x43c\x43e\x442\x440\x438 \n mno   pqr\tstu";
+        L"\x421\x43c\x43e\x442\x440\x438 \n mno   pqr\tstu def-\r\nghi \r\n\r\n";
     size_t pool_len = wcslen(POOL);
     for (size_t i = 0; i < len; i++) {
         buf[i] = POOL[next_rand() % pool_len];
