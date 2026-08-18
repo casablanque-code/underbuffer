@@ -24,6 +24,8 @@
 
 typedef wchar_t WCHAR;
 typedef int BOOL;
+typedef unsigned long DWORD;
+typedef void *HWND;
 #ifndef TRUE
 #define TRUE 1
 #endif
@@ -47,6 +49,16 @@ static inline int _wcsnicmp(const WCHAR *a, const WCHAR *b, size_t n) {
         if (ca == L'\0') break;
     }
     return 0;
+}
+
+static inline int _wcsicmp(const WCHAR *a, const WCHAR *b) {
+    for (;;) {
+        WCHAR ca = towlower(*a);
+        WCHAR cb = towlower(*b);
+        if (ca != cb) return (int)ca - (int)cb;
+        if (ca == L'\0') return 0;
+        a++; b++;
+    }
 }
 
 #endif /* UB_TEST_WINDOWS_SHIM_H */

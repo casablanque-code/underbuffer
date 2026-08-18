@@ -17,4 +17,8 @@ extern const size_t UB_SYNC_PIPELINE_COUNT;
  * string (a copy of input if nothing changed), or NULL on OOM. */
 WCHAR *ub_pipeline_run_sync(const WCHAR *input);
 
+/* Extends the built-in tracker param list. Not required -- unset means
+ * only the built-in list applies, which is what existing tests get. */
+void ub_url_set_extra_trackers(const WCHAR *const *list, size_t count);
+
 #endif

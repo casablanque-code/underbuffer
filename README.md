@@ -24,8 +24,13 @@ No windows, no UI on top of the system -- runs from the tray.
 
 No network on the critical path: text processing is entirely local
 and synchronous. An optional background (non-blocking) link
-availability check lives separately and its result is only logged
-for now -- it doesn't rewrite the clipboard.
+availability check runs after the fact -- if the cleaned link turns
+out to be broken (a definitive HTTP 4xx/5xx, not just a flaky
+network), the clipboard is automatically reverted to the original,
+uncleaned text. Some links only work with specific tracking params
+attached; this way stripping them never silently breaks the link you
+meant to share. See [Configuration](#configuration) to disable this
+or tune the timeout.
 
 There's **no base64/URL-decode detector on purpose** -- too easy to
 accidentally decode and expose something that was copied deliberately
@@ -70,6 +75,35 @@ snapshotted and restored after the cleaned text is written (see
 GMEM-backed and can't be duplicated the same way, but a `CF_DIB`
 sibling -- which almost every source app also provides -- survives.
 
+## Configuration
+
+`%LOCALAPPDATA%\UnderBuffer\config.ini`, created automatically on
+first run with a commented template. Edit it and restart UnderBuffer
+to apply changes (it's read once at startup, not watched live).
+
+```ini
+# Background HEAD check on cleaned links (does not block the clipboard
+# rewrite itself). If the cleaned link turns out to be broken, the
+# original (uncleaned) clipboard text is restored automatically --
+# some links only work with specific tracking params attached.
+netcheck_enabled=true
+
+# Milliseconds before the check gives up on a link.
+netcheck_timeout_ms=3000
+
+# Start UnderBuffer automatically when you log into Windows.
+autorun_enabled=false
+
+# Extra query parameters to strip from links, on top of the built-in
+# list (utm_*, fbclid, gclid, si, ...). One per line, exact match,
+# case-insensitive.
+# extra_tracker_param=ref
+# extra_tracker_param=my_custom_param
+```
+
+Unknown keys are ignored, so old config files stay valid across
+updates that add new options.
+
 ## Install
 
 Download `underbuffer.exe` from [Releases](../../releases) and run
@@ -82,9 +116,10 @@ show "Windows protected your PC". That's expected for unsigned
 binaries -- click "More info" -> "Run anyway". See building from
 source below if you'd rather not trust someone else's exe.
 
-Auto-start on login isn't wired up automatically yet -- add a
-shortcut to the exe in `shell:startup` (Win+R -> `shell:startup` ->
-Enter) manually if you need it.
+Auto-start on login: set `autorun_enabled=true` in
+`config.ini` (see [Configuration](#configuration)) and restart --
+UnderBuffer registers itself in `HKCU\...\Run` and will start with
+Windows from then on. Flip it back to `false` to remove it.
 
 ## Building from source
 
@@ -93,15 +128,23 @@ See [docs/BUILD.md](docs/BUILD.md).
 ## How it's built
 
 - `src/main.c` -- message-only window, listens for
-  `WM_CLIPBOARDUPDATE`, tray icon.
+  `WM_CLIPBOARDUPDATE`, tray icon, wires config/autorun at startup.
 - `src/clipboard.c` -- clipboard read/write with race protection
   (checks `GetClipboardSequenceNumber` before rewriting) and
   anti-recursion (our own `SetClipboardData` must not trigger itself).
 - `src/detector_*.c` + `src/pipeline.c` -- text processing, pure
   `WCHAR* -> WCHAR*` functions with no clipboard access -- which is
   why they can be unit-tested natively, without Windows (see below).
-- `src/netcheck.c` -- optional async HEAD check over WinHTTP, doesn't
-  block the main thread.
+- `src/config.c` -- pure config-file parsing (also natively testable);
+  `src/config_io.c` -- the disk I/O around it (create/read
+  `config.ini`), kept separate so the parsing logic doesn't need real
+  Win32 file APIs to test.
+- `src/autorun.c` -- `HKCU\...\Run` registry entry, applied once at
+  startup based on `autorun_enabled`.
+- `src/netcheck.c` -- async HEAD check over WinHTTP on a worker
+  thread, never blocks the main thread. The revert-on-broken-link
+  decision is a pure function (`ub_netcheck_should_revert` in
+  `netcheck.h`), unit-tested without a real network call.
 
 ## Tests
 
@@ -109,15 +152,17 @@ See [docs/BUILD.md](docs/BUILD.md).
 make test
 ```
 
-Runs detector unit tests with native `gcc` (no mingw, no Windows) --
-`tests/test_detectors.c` + `tests/compat/windows.h` (a minimal stand-in
-for `<windows.h>` covering `WCHAR`/`BOOL` and a couple of CRT
-functions). Fast dev loop: edit `src/detector_*.c` -> `make test` ->
-results in seconds.
+Runs detector and config-parsing unit tests with native `gcc` (no
+mingw, no Windows) -- `tests/test_detectors.c` +
+`tests/compat/windows.h` (a minimal stand-in for `<windows.h>`
+covering `WCHAR`/`BOOL`/`DWORD`/`HWND` and a couple of CRT functions).
+Fast dev loop: edit `src/detector_*.c` or `src/config.c` -> `make
+test` -> results in seconds.
 
 This doesn't replace the final check: `clipboard.c`/`main.c`/
-`netcheck.c` aren't covered by these tests (real Win32 integration) --
-the final check is a `make`-built exe, run by hand on Windows.
+`netcheck.c`/`config_io.c`/`autorun.c` aren't covered by these tests
+(real Win32 integration: registry, files, sockets) -- the final check
+is a `make`-built exe, run by hand on Windows.
 
 ```bash
 make stress
@@ -134,6 +179,16 @@ Valgrind (`--leak-check=full`).
 `.github/workflows/ci.yml`: every push/PR runs `make test`, `make
 stress` (plus under Valgrind), then builds `underbuffer.exe` with
 mingw-w64 and attaches it as a run artifact.
+
+## Known gaps
+
+- `clipboard.c` (the actual Win32 read/write, race protection, format
+  preservation) has no automated test coverage -- only manual
+  verification on real Windows. A `windows-latest` CI job exercising
+  the real clipboard API is the natural next step; not done yet.
+- Tracker param list and revert threshold (4xx/5xx) are still fixed
+  in code, not configurable -- only the extra-tracker list and
+  netcheck timing are, via `config.ini`.
 
 ## License
 

@@ -11,6 +11,8 @@
  * touch clipboard.c/main.c/netcheck.c — the actual Win32 integration).
  */
 #include "detector.h"
+#include "config.h"
+#include "netcheck.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +50,28 @@ static void check_null(const char *test_name, const WCHAR *got)
     if (got != NULL) {
         printf("[FAIL] %s: expected NULL (detector should not apply), got: %ls\n",
                test_name, got);
+        g_failed++;
+        return;
+    }
+    printf("[ OK ] %s\n", test_name);
+}
+
+static void check_true(const char *test_name, BOOL got)
+{
+    g_total++;
+    if (!got) {
+        printf("[FAIL] %s: expected TRUE, got FALSE\n", test_name);
+        g_failed++;
+        return;
+    }
+    printf("[ OK ] %s\n", test_name);
+}
+
+static void check_false(const char *test_name, BOOL got)
+{
+    g_total++;
+    if (got) {
+        printf("[FAIL] %s: expected FALSE, got TRUE\n", test_name);
         g_failed++;
         return;
     }
@@ -247,6 +271,128 @@ static void test_unbreak_crlf_cyrillic(void)
     free(r);
 }
 
+/* ---- config ---- */
+
+static void test_config_defaults(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    check_true("config: netcheck enabled by default", cfg.netcheck_enabled);
+    check_true("config: default timeout is 3000ms", cfg.netcheck_timeout_ms == 3000);
+    check_false("config: autorun disabled by default", cfg.autorun_enabled);
+    check_true("config: no extra trackers by default", cfg.extra_tracker_count == 0);
+    ub_config_free(&cfg);
+}
+
+static void test_config_parses_known_keys(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    ub_config_parse(
+        L"# comment\n"
+        L"netcheck_enabled=false\n"
+        L"netcheck_timeout_ms=5000\n"
+        L"autorun_enabled=true\n",
+        &cfg);
+    check_false("config: netcheck_enabled=false parsed", cfg.netcheck_enabled);
+    check_true("config: netcheck_timeout_ms=5000 parsed", cfg.netcheck_timeout_ms == 5000);
+    check_true("config: autorun_enabled=true parsed", cfg.autorun_enabled);
+    ub_config_free(&cfg);
+}
+
+static void test_config_ignores_unknown_keys_and_blank_lines(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    ub_config_parse(
+        L"\n"
+        L"some_future_key=whatever\n"
+        L"   \n"
+        L"netcheck_enabled=false\n",
+        &cfg);
+    check_false("config: known key still applies alongside unknown ones", cfg.netcheck_enabled);
+    ub_config_free(&cfg);
+}
+
+static void test_config_collects_repeated_extra_trackers(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    ub_config_parse(
+        L"extra_tracker_param=ref\n"
+        L"extra_tracker_param=my_custom_param\n",
+        &cfg);
+    check_true("config: two extra_tracker_param lines collected", cfg.extra_tracker_count == 2);
+    if (cfg.extra_tracker_count == 2) {
+        check_true("config: first extra tracker is 'ref'", wcscmp(cfg.extra_trackers[0], L"ref") == 0);
+        check_true("config: second extra tracker is 'my_custom_param'",
+                   wcscmp(cfg.extra_trackers[1], L"my_custom_param") == 0);
+    }
+    ub_config_free(&cfg);
+}
+
+static void test_config_bool_accepts_yes_no_1_0(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    ub_config_parse(L"autorun_enabled=yes\n", &cfg);
+    check_true("config: 'yes' parses as TRUE", cfg.autorun_enabled);
+    ub_config_free(&cfg);
+
+    ub_config_defaults(&cfg);
+    ub_config_parse(L"autorun_enabled=0\n", &cfg);
+    check_false("config: '0' parses as FALSE", cfg.autorun_enabled);
+    ub_config_free(&cfg);
+}
+
+static void test_config_garbage_timeout_keeps_default(void)
+{
+    ub_config_t cfg;
+    ub_config_defaults(&cfg);
+    ub_config_parse(L"netcheck_timeout_ms=not_a_number\n", &cfg);
+    check_true("config: unparseable timeout falls back to default", cfg.netcheck_timeout_ms == 3000);
+    ub_config_free(&cfg);
+}
+
+static void test_url_extra_tracker_from_config_gets_stripped(void)
+{
+    static const WCHAR *extra[] = { L"ref", L"my_custom_param" };
+    ub_url_set_extra_trackers(extra, 2);
+
+    WCHAR *r = ub_detect_url(L"https://example.com/?id=1&ref=partner&my_custom_param=x");
+    check_eq("url: extra tracker from config gets stripped alongside built-ins",
+             r, L"https://example.com/?id=1");
+    free(r);
+
+    ub_url_set_extra_trackers(NULL, 0); /* reset so later tests see default behavior */
+}
+
+/* ---- netcheck decision (pure logic, no real network) ---- */
+
+static void test_netcheck_reverts_on_4xx(void)
+{
+    check_true("netcheck: reverts on 404", ub_netcheck_should_revert(TRUE, 404));
+}
+
+static void test_netcheck_reverts_on_5xx(void)
+{
+    check_true("netcheck: reverts on 500", ub_netcheck_should_revert(TRUE, 500));
+}
+
+static void test_netcheck_keeps_on_2xx(void)
+{
+    check_false("netcheck: keeps cleaned link on 200", ub_netcheck_should_revert(TRUE, 200));
+}
+
+static void test_netcheck_keeps_on_request_failure(void)
+{
+    /* Timeout/DNS/connection failure is ambiguous -- could be a flaky
+     * network, not evidence the stripped params were needed. Revert
+     * only on a definitive bad-status response. */
+    check_false("netcheck: does not revert on a failed request (timeout/DNS/etc)",
+                ub_netcheck_should_revert(FALSE, 0));
+}
+
 /* ---- pipeline (integration) ---- */
 
 static void test_pipeline_json_passthrough(void)
@@ -303,6 +449,19 @@ int main(void)
     test_unbreak_crlf_hyphen_wordbreak();
     test_unbreak_crlf_double_preserved();
     test_unbreak_crlf_cyrillic();
+
+    test_config_defaults();
+    test_config_parses_known_keys();
+    test_config_ignores_unknown_keys_and_blank_lines();
+    test_config_collects_repeated_extra_trackers();
+    test_config_bool_accepts_yes_no_1_0();
+    test_config_garbage_timeout_keeps_default();
+    test_url_extra_tracker_from_config_gets_stripped();
+
+    test_netcheck_reverts_on_4xx();
+    test_netcheck_reverts_on_5xx();
+    test_netcheck_keeps_on_2xx();
+    test_netcheck_keeps_on_request_failure();
 
     test_pipeline_json_passthrough();
     test_pipeline_wrapped_url_with_softwrap();

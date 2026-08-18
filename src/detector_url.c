@@ -27,6 +27,19 @@ static const WCHAR *TRACKER_PARAM_PREFIXES[] = {
 static const size_t TRACKER_PARAM_COUNT =
     sizeof(TRACKER_PARAM_PREFIXES) / sizeof(TRACKER_PARAM_PREFIXES[0]);
 
+/* Set once at startup from config; unset (NULL/0) is the default and
+ * matches pre-config behavior exactly, so existing tests don't need
+ * to call this. Not freed here -- caller (main.c) owns the config
+ * struct's lifetime, which is the whole process. */
+static const WCHAR *const *g_extra_trackers = NULL;
+static size_t g_extra_tracker_count = 0;
+
+void ub_url_set_extra_trackers(const WCHAR *const *list, size_t count)
+{
+    g_extra_trackers = list;
+    g_extra_tracker_count = count;
+}
+
 static BOOL is_tracker_param(const WCHAR *key, size_t key_len)
 {
     for (size_t i = 0; i < TRACKER_PARAM_COUNT; i++) {
@@ -35,6 +48,12 @@ static BOOL is_tracker_param(const WCHAR *key, size_t key_len)
             if (plen == key_len || TRACKER_PARAM_PREFIXES[i][plen - 1] == L'_') {
                 return TRUE;
             }
+        }
+    }
+    for (size_t i = 0; i < g_extra_tracker_count; i++) {
+        size_t elen = wcslen(g_extra_trackers[i]);
+        if (elen == key_len && _wcsnicmp(key, g_extra_trackers[i], key_len) == 0) {
+            return TRUE;
         }
     }
     return FALSE;

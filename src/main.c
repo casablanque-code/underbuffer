@@ -3,6 +3,9 @@
 #include "detector.h"
 #include "netcheck.h"
 #include "log.h"
+#include "config.h"
+#include "config_io.h"
+#include "autorun.h"
 #include <wchar.h>
 
 #define WM_UB_TRAYICON (WM_APP + 1)
@@ -11,6 +14,7 @@
 
 static const WCHAR *WINDOW_CLASS = L"UnderBufferListenerWnd";
 static NOTIFYICONDATAW g_nid = { 0 };
+static ub_config_t g_config;
 
 static BOOL looks_like_bare_url(const WCHAR *s)
 {
@@ -43,10 +47,10 @@ static void handle_clipboard_update(HWND hwnd)
             ub_log(L"pipeline: rewrote clipboard (%zu -> %zu chars)",
                     wcslen(original), wcslen(processed));
 
-            /* Non-blocking availability check; result is logged only, see netcheck.h. */
-            if (looks_like_bare_url(processed)) {
+            if (g_config.netcheck_enabled && looks_like_bare_url(processed)) {
                 DWORD fresh_seq = ub_clipboard_sequence();
-                ub_netcheck_start_async(processed, fresh_seq);
+                ub_netcheck_start_async(hwnd, processed, original, fresh_seq,
+                                          g_config.netcheck_timeout_ms);
             }
         } else {
             ub_log(L"pipeline: skipped rewrite, clipboard changed under us (stale seq)");
@@ -132,6 +136,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     ub_log(L"UnderBuffer starting up");
 
+    ub_config_load(&g_config);
+    ub_url_set_extra_trackers((const WCHAR *const *)g_config.extra_trackers,
+                               g_config.extra_tracker_count);
+    ub_autorun_apply(g_config.autorun_enabled);
+
     WNDCLASSEXW wc = { 0 };
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = WndProc;
@@ -164,6 +173,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     ub_log(L"UnderBuffer shutting down");
     ub_log_shutdown();
+    ub_config_free(&g_config);
     if (hMutex) {
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);

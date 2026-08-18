@@ -1,7 +1,7 @@
 CC      := x86_64-w64-mingw32-gcc
 RC      := x86_64-w64-mingw32-windres
 CFLAGS  := -municode -Wall -Wextra -std=c99 -Iinclude -O2
-LDFLAGS := -municode -mwindows -lshell32 -lole32 -lwinhttp -luuid
+LDFLAGS := -municode -mwindows -lshell32 -lole32 -lwinhttp -luuid -ladvapi32
 
 SRC := $(wildcard src/*.c)
 OBJ := $(SRC:src/%.c=build/%.o)
@@ -38,12 +38,15 @@ clean:
 
 # --- detector unit tests ----------------------------------------------------
 # Run with native gcc (no mingw, no Windows) via tests/compat/windows.h.
-# detector_url.c/detector_json.c/detector_unbreak.c/pipeline.c make zero real
-# Win32 calls — just WCHAR/BOOL and a couple of CRT functions — so their logic
-# can be checked far faster than building the exe and copy-pasting by hand.
-# clipboard.c/main.c/netcheck.c are not covered by these tests.
+# detector_url.c/detector_json.c/detector_unbreak.c/pipeline.c/config.c make
+# zero real Win32 calls — just WCHAR/BOOL and a couple of CRT functions — so
+# their logic can be checked far faster than building the exe and
+# copy-pasting by hand.
+# clipboard.c/main.c/netcheck.c/config_io.c/autorun.c are not covered here --
+# they're real Win32 integration (registry, files, sockets), verified by an
+# actual `make` build and a manual run on Windows.
 TEST_CC    := gcc
-TEST_SRC   := tests/test_detectors.c src/pipeline.c src/detector_url.c src/detector_json.c src/detector_unbreak.c
+TEST_SRC   := tests/test_detectors.c src/pipeline.c src/detector_url.c src/detector_json.c src/detector_unbreak.c src/config.c
 TEST_BIN   := build/test_detectors
 TEST_FLAGS := -Wall -Wextra -std=c99 -Iinclude -Itests/compat -g
 
