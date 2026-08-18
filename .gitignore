@@ -1,3 +1,4 @@
 /build
 *.patch
 *.exe
+resources/icon_*.png

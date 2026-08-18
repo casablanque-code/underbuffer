@@ -2,28 +2,9 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-/*
- * ПОЧЕМУ WCHAR*, А НЕ char*+UTF-8 (см. историю коммитов):
- * Предыдущая версия гоняла текст через WideCharToMultiByte/
- * MultiByteToWideChar в pipeline.c и работала с char*-буферами
- * фиксированного размера (char url[2048], char current[4096]).
- * Это дало три проблемы разом:
- *   1) pipeline.c вызывал ub_detect_json (который остался WCHAR*-based)
- *      через несовместимый char*-прототип -> UB, JSON-форматирование
- *      молча ломалось при реальном запуске.
- *   2) tests/test_detectors.c и detector.h остались рассчитаны на
- *      старый WCHAR*->WCHAR* контракт -> make test не собирался.
- *   3) фиксированные буферы 2048/4096 -- риск обрезания длинных URL.
- * Решение: детекторы остаются на WCHAR* (нативный код единиц Windows,
- * никакой лишней конвертации), а Unicode-баг (см. detector_unbreak.c)
- * чинится точечно, без смены всей архитектуры на байты.
- *
- * Этот детектор сканирует ВЕСЬ буфер на предмет http(s)-ссылок (а не
- * только "буфер = ровно одна ссылка"), чистит трекинговые параметры
- * у каждой найденной ссылки и оставляет остальной текст как есть --
- * это покрывает и голую ссылку, и ссылку в тексте, и markdown-обёртку
- * вида [text](url).
- */
+/* No base64/URL-decode detector on purpose: auto-decoding arbitrary
+ * strings risks exposing something copied deliberately as-is
+ * (a token, a password, a key). */
 
 static const WCHAR *TRACKER_PARAM_PREFIXES[] = {
     L"utm_",
@@ -59,10 +40,7 @@ static BOOL is_tracker_param(const WCHAR *key, size_t key_len)
     return FALSE;
 }
 
-/* Символы, на которых обрывается ссылка: пробельные + типичные
- * "обёрточные" символы markdown/цитирования (закрывающая скобка
- * ссылки, кавычка и т.п.), чтобы "[text](url)" и "url)." не тянули
- * за собой лишнее. */
+/* Markdown/quoting wrappers ("[text](url)", "url).") also end a URL. */
 static BOOL is_url_delim(WCHAR c)
 {
     switch (c) {
@@ -74,7 +52,6 @@ static BOOL is_url_delim(WCHAR c)
     }
 }
 
-/* --- маленький растущий буфер, локальный для этого файла --- */
 typedef struct { WCHAR *buf; size_t len; size_t cap; } sb_t;
 
 static BOOL sb_init(sb_t *sb, size_t cap)
@@ -114,18 +91,17 @@ static BOOL sb_puts(sb_t *sb, const WCHAR *s, size_t n)
     return TRUE;
 }
 
-/* Чистит один URL (url[0..url_len)). Возвращает malloc'нутую
- * очищенную версию, или NULL если чистить нечего (нет '?' вообще,
- * или все параметры остались как есть -- ни один не трекинговый). */
+/* Returns malloc'd cleaned URL, or NULL if there's nothing to clean
+ * (no query string, or no tracker params present). */
 static WCHAR *clean_one_url(const WCHAR *url, size_t url_len)
 {
     size_t qpos = url_len;
     for (size_t i = 0; i < url_len; i++) {
         if (url[i] == L'?') { qpos = i; break; }
     }
-    if (qpos == url_len) return NULL; /* нет query string */
+    if (qpos == url_len) return NULL;
 
-    size_t hpos = url_len; /* начало '#fragment', если есть */
+    size_t hpos = url_len;
     for (size_t i = qpos; i < url_len; i++) {
         if (url[i] == L'#') { hpos = i; break; }
     }
@@ -157,9 +133,8 @@ static WCHAR *clean_one_url(const WCHAR *url, size_t url_len)
 
     if (!any_dropped) {
         free(out.buf);
-        return NULL; /* все параметры полезные -- ссылку не трогаем */
+        return NULL;
     }
-
     if (hpos < url_len) {
         if (!sb_puts(&out, url + hpos, url_len - hpos)) { free(out.buf); return NULL; }
     }
@@ -205,7 +180,6 @@ WCHAR *ub_detect_url(const WCHAR *input)
     }
 
     if (!sb_putc(&sb, L'\0')) { free(sb.buf); return NULL; }
-
     if (!changed) {
         free(sb.buf);
         return NULL;

@@ -2,13 +2,10 @@
 #include <stdlib.h>
 #include <wchar.h>
 
-/*
- * Минимальный, но корректный JSON pretty-printer. Не парсит в дерево
- * (не нужно — только форматирует), но уважает строки/экранирование,
- * чтобы не сломать отступы внутри "текста со скобками {и} запятыми,".
- * Если на вход пришло что-то, что не похоже на валидный JSON (парность
- * скобок/кавычек не сходится), возвращает NULL — детектор не применён.
- */
+/* Minimal pretty-printer -- no tree parsing, just formatting, but
+ * string/escape-aware so brackets inside string values don't throw
+ * off indentation. Returns NULL if the input doesn't look like valid
+ * JSON (unbalanced brackets/quotes). */
 
 typedef struct {
     WCHAR *buf;
@@ -51,9 +48,8 @@ static BOOL sb_indent(sb_t *sb, int depth)
     return TRUE;
 }
 
-/* Быстрая эвристическая проверка "похоже на JSON": первый непробельный
- * символ — { или [, и число открывающих/закрывающих скобок совпадает
- * вне строк. Дёшево и отсекает случайный текст со скобками. */
+/* Cheap heuristic: starts with { or [, and brackets balance outside
+ * of strings. */
 static BOOL looks_like_json(const WCHAR *s)
 {
     while (*s == L' ' || *s == L'\t' || *s == L'\r' || *s == L'\n') s++;
@@ -104,13 +100,13 @@ WCHAR *ub_detect_json(const WCHAR *input)
             ok = sb_putc(&sb, *p);
             break;
         case L' ': case L'\t': case L'\r': case L'\n':
-            /* исходные пробелы вне строк отбрасываем — расставим свои */
+            /* original whitespace outside strings is dropped, ours added below */
             break;
         case L'{': case L'[': {
             WCHAR next = *(p + 1);
             ok = sb_putc(&sb, *p);
             if (next == L'}' || next == L']') {
-                /* пустой объект/массив: {} / [] без переноса */
+                /* empty {}/[] -- no newline */
                 break;
             }
             depth++;

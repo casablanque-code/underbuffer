@@ -4,30 +4,22 @@
 
 BOOL ub_path_join(WCHAR *out, size_t out_cap, const WCHAR *base, const WCHAR *leaf)
 {
-    if (!out || !base || !leaf || out_cap == 0) {
-        return FALSE;
-    }
+    if (!out || !base || !leaf || out_cap == 0) return FALSE;
 
     size_t base_len = wcslen(base);
     size_t leaf_len = wcslen(leaf);
 
-    /* Срезаем хвостовые разделители у base (любые: '\\' или '/'),
-     * чтобы не получить "C:\Foo\\\\bar" при склейке. */
     while (base_len > 0 && (base[base_len - 1] == L'\\' || base[base_len - 1] == L'/')) {
         base_len--;
     }
-    /* Срезаем ведущие разделители у leaf по той же причине. */
     size_t leaf_start = 0;
     while (leaf_start < leaf_len && (leaf[leaf_start] == L'\\' || leaf[leaf_start] == L'/')) {
         leaf_start++;
     }
     size_t leaf_effective_len = leaf_len - leaf_start;
 
-    /* base_len + '\\' + leaf_effective_len + '\0' */
     size_t needed = base_len + 1 + leaf_effective_len + 1;
-    if (needed > out_cap) {
-        return FALSE; /* явный отказ вместо тихого усечения */
-    }
+    if (needed > out_cap) return FALSE;
 
     memcpy(out, base, base_len * sizeof(WCHAR));
     out[base_len] = L'\\';
@@ -49,21 +41,15 @@ BOOL ub_get_app_data_dir(WCHAR *out, size_t out_cap)
     WCHAR app_dir[MAX_PATH];
     BOOL joined = ub_path_join(app_dir, MAX_PATH, local_appdata, L"UnderBuffer");
     CoTaskMemFree(local_appdata);
-    if (!joined) {
-        return FALSE;
-    }
+    if (!joined) return FALSE;
 
     if (!CreateDirectoryW(app_dir, NULL)) {
         DWORD err = GetLastError();
-        if (err != ERROR_ALREADY_EXISTS) {
-            return FALSE;
-        }
+        if (err != ERROR_ALREADY_EXISTS) return FALSE;
     }
 
     size_t len = wcslen(app_dir);
-    if (len + 1 > out_cap) {
-        return FALSE;
-    }
+    if (len + 1 > out_cap) return FALSE;
     memcpy(out, app_dir, (len + 1) * sizeof(WCHAR));
     return TRUE;
 }

@@ -1,4 +1,5 @@
 CC      := x86_64-w64-mingw32-gcc
+RC      := x86_64-w64-mingw32-windres
 CFLAGS  := -municode -Wall -Wextra -std=c99 -Iinclude -O2
 LDFLAGS := -municode -mwindows -lshell32 -lole32 -lwinhttp -luuid
 
@@ -6,13 +7,28 @@ SRC := $(wildcard src/*.c)
 OBJ := $(SRC:src/%.c=build/%.o)
 BIN := build/underbuffer.exe
 
+# Icon is optional: without resources/icon.ico the exe still builds,
+# falling back to the system icon (see resources/README.md).
+ICON := resources/icon.ico
+ifneq ($(wildcard $(ICON)),)
+    RES_OBJ := build/app_res.o
+else
+    RES_OBJ :=
+endif
+
 all: $(BIN)
 
 build/%.o: src/%.c | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BIN): $(OBJ)
-	$(CC) $(OBJ) $(LDFLAGS) -o $@
+build/app_res.o: resources/app.rc $(ICON) | build
+	$(RC) resources/app.rc -O coff -o $@
+
+$(BIN): $(OBJ) $(RES_OBJ)
+ifeq ($(RES_OBJ),)
+	@echo "note: resources/icon.ico not found -- building without embedded icon (see resources/README.md)"
+endif
+	$(CC) $(OBJ) $(RES_OBJ) $(LDFLAGS) -o $@
 
 build:
 	mkdir -p build
@@ -35,4 +51,11 @@ test: build
 	$(TEST_CC) $(TEST_FLAGS) $(TEST_SRC) -o $(TEST_BIN)
 	./$(TEST_BIN)
 
-.PHONY: all clean test
+STRESS_SRC := tests/stress_test.c src/pipeline.c src/detector_url.c src/detector_json.c src/detector_unbreak.c
+STRESS_BIN := build/stress_test
+
+stress: build
+	$(TEST_CC) $(TEST_FLAGS) $(STRESS_SRC) -o $(STRESS_BIN) -lpthread
+	./$(STRESS_BIN)
+
+.PHONY: all clean test stress

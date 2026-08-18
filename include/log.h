@@ -3,8 +3,8 @@
 
 #include <windows.h>
 
-BOOL ub_log_init(void);       /* открывает %LOCALAPPDATA%\UnderBuffer\underbuffer.log */
+BOOL ub_log_init(void);
 void ub_log(const WCHAR *fmt, ...);
 void ub_log_shutdown(void);
 
-#endif /* UB_LOG_H */
+#endif

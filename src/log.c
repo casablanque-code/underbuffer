@@ -9,17 +9,10 @@ static CRITICAL_SECTION g_log_lock;
 BOOL ub_log_init(void)
 {
     WCHAR app_dir[MAX_PATH];
-    if (!ub_get_app_data_dir(app_dir, MAX_PATH)) {
-        return FALSE;
-    }
+    if (!ub_get_app_data_dir(app_dir, MAX_PATH)) return FALSE;
 
-    /* Единственное место, где строится путь к лог-файлу — через
-     * ub_path_join(), никаких литералов вида L"%s/%s" или ручных
-     * L"\\\\" склеек в остальном коде. */
     WCHAR log_path[MAX_PATH];
-    if (!ub_path_join(log_path, MAX_PATH, app_dir, L"underbuffer.log")) {
-        return FALSE;
-    }
+    if (!ub_path_join(log_path, MAX_PATH, app_dir, L"underbuffer.log")) return FALSE;
 
     InitializeCriticalSection(&g_log_lock);
     g_log_file = _wfopen(log_path, L"a, ccs=UTF-8");

@@ -6,10 +6,9 @@
 
 #pragma comment(lib, "winhttp.lib")
 
-/* WinHTTP выбран вместо WinINet: WinINet рассчитан на приложения с
- * message loop и UI (диалоги авторизации, зависимость от контекста
- * пользовательской сессии), а для фонового демона без окон WinHTTP —
- * официально рекомендуемый Microsoft вариант для сервисов/демонов. */
+/* WinHTTP, not WinINet: WinINet targets UI apps with a message loop
+ * (auth dialogs, session-context dependence); WinHTTP is Microsoft's
+ * recommended choice for services/daemons without a visible UI. */
 
 typedef struct {
     WCHAR *url;
@@ -39,9 +38,6 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
                                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) { ub_log(L"netcheck: WinHttpOpen failed"); goto cleanup; }
 
-    /* Короткие таймауты: connect/send/receive. Это фоновая проверка,
-     * а не критичная операция — лучше пропустить проверку, чем
-     * держать поток (и косвенно — очередь потоков) секундами. */
     WinHttpSetTimeouts(hSession, 3000, 3000, 3000, 3000);
 
     HINTERNET hConnect = WinHttpConnect(hSession, uc.lpszHostName, uc.nPort, 0);
@@ -84,7 +80,7 @@ void ub_netcheck_start_async(const WCHAR *url, DWORD clipboard_seq_at_capture)
 
     HANDLE h = CreateThread(NULL, 0, netcheck_thread, ctx, 0, NULL);
     if (h) {
-        CloseHandle(h); /* fire-and-forget; поток сам себя чистит */
+        CloseHandle(h);
     } else {
         free(ctx->url);
         free(ctx);
