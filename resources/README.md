@@ -1,21 +1,21 @@
-# Иконка
+# Icon
 
-Сборка ожидает `resources/icon.ico` -- многослойный `.ico` (как
-минимум 16x16, 32x32, 48x48, 256x256), встраиваемый в exe и в
-трей через `resources/app.rc`.
+The build expects `resources/icon.ico` -- a multi-size `.ico` (at
+least 16x16, 32x32, 48x48, 256x256), embedded into the exe and the
+tray icon via `resources/app.rc`.
 
-SVG сам по себе Win32-ресурсом быть не может -- нужен `.ico`.
-Если у вас уже есть `icon.svg`, положите его в `resources/icon.svg`
-(для истории/переиспользования) и сконвертируйте одним из способов:
+An SVG can't be a Win32 resource by itself -- you need a `.ico`.
+If you already have `icon.svg`, drop it at `resources/icon.svg` (for
+reference/reuse) and convert it with one of:
 
-## Через ImageMagick (просто, кросс-платформенно)
+## ImageMagick (simplest, cross-platform)
 
 ```bash
-# в WSL/Linux: sudo apt install imagemagick
+# on WSL/Linux: sudo apt install imagemagick
 magick resources/icon.svg -define icon:auto-resize=256,48,32,16 resources/icon.ico
 ```
 
-## Через Inkscape + ImageMagick (если ImageMagick без librsvg)
+## Inkscape + ImageMagick (if ImageMagick lacks librsvg)
 
 ```bash
 for sz in 16 32 48 256; do
@@ -25,14 +25,14 @@ magick resources/icon_16.png resources/icon_32.png resources/icon_48.png resourc
 rm resources/icon_*.png
 ```
 
-## Онлайн (без установки чего-либо)
+## Online (no local install)
 
-Любой конвертер вида "SVG to ICO" с опцией multi-size (например
-convertio.co, icoconvert.com) -- главное чтобы в один `.ico` вошли
-несколько размеров, иначе иконка будет мыльной в одних местах
-интерфейса (трей/Alt+Tab/проводник используют разные размеры).
+Any "SVG to ICO" converter with a multi-size option (e.g.
+convertio.co, icoconvert.com) -- multiple sizes in one `.ico` matter,
+otherwise the icon looks blurry in some places (tray/Alt+Tab/Explorer
+use different sizes).
 
-После того как `resources/icon.ico` появился -- `make clean && make`
-подхватит его автоматически (см. `resources/app.rc` и `Makefile`).
-Без файла сборка **осознанно падает** на этапе `windres` с понятной
-ошибкой, а не тихо собирает exe без иконки.
+Once `resources/icon.ico` exists, `make clean && make` picks it up
+automatically (see `resources/app.rc` and `Makefile`). Without the
+file the build **intentionally fails** at the `windres` step with a
+clear error, rather than silently shipping an exe with no icon.

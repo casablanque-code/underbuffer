@@ -1,144 +1,140 @@
 # UnderBuffer
 
-Фоновый демон для Windows, который слушает буфер обмена и на лету
-приводит скопированный текст в порядок: убирает трекинговые
-параметры из ссылок, склеивает разорванные переносами строки
-(PDF/терминал), красиво форматирует JSON.
+A Windows background daemon that listens to the clipboard and cleans
+up copied text on the fly: strips tracking parameters from links,
+rejoins text broken by line wraps (PDF/terminal copies), and
+pretty-prints JSON.
 
-Без окон, без UI поверх системы -- работает из трея.
+No windows, no UI on top of the system -- runs from the tray.
 
-## Что делает
+## What it does
 
-- **Ссылки.** Вырезает `utm_*`, `fbclid`, `gclid`, `si` и другие
-  трекинговые параметры из query string. Работает с голой ссылкой,
-  со ссылкой внутри произвольного текста и со ссылкой, обёрнутой в
-  markdown (`[текст](ссылка)`). Полезные параметры (`?id=...`,
-  `?q=...`) и `#fragment` остаются нетронутыми.
-- **Рваный текст.** Если текст скопирован из PDF или терминала и
-  разбит переносами строк посреди предложений -- склеивает обратно
-  в один связный текст, включая перенос слова через дефис
-  (`интерес-\nный` → `интересный`). Разрывы между абзацами (двойной
-  перенос) и после точки/маркеров списка не трогает.
-- **JSON.** Если буфер похож на компактный JSON -- форматирует с
-  отступами.
+- **Links.** Strips `utm_*`, `fbclid`, `gclid`, `si`, and other
+  tracking params from the query string. Works on a bare link, a link
+  embedded in arbitrary text, and a link wrapped in markdown
+  (`[text](link)`). Useful params (`?id=...`, `?q=...`) and
+  `#fragment` are left alone.
+- **Broken text.** If text copied from a PDF or a terminal is split
+  by line wraps mid-sentence, glues it back into one flowing block,
+  including hyphenated word wraps (`interes-\nting` -> `interesting`).
+  Paragraph breaks (double newline) and breaks after a period/list
+  marker are left untouched.
+- **JSON.** If the buffer looks like compact JSON, formats it with
+  indentation.
 
-Никакой сети в критичном пути: обработка текста -- целиком локальная
-и синхронная. Опциональная фоновая (не блокирующая) проверка
-доступности ссылки живёт отдельно и результат сейчас только
-логируется, буфер обмена по её результату не переписывается.
+No network on the critical path: text processing is entirely local
+and synchronous. An optional background (non-blocking) link
+availability check lives separately and its result is only logged
+for now -- it doesn't rewrite the clipboard.
 
-Base64/URL-decode детектора в проекте **нет намеренно** -- слишком
-легко случайно раскодировать и тем самым засветить что-то, что было
-скопировано специально "как есть" (токен, пароль, ключ).
+There's **no base64/URL-decode detector on purpose** -- too easy to
+accidentally decode and expose something that was copied deliberately
+as-is (a token, a password, a key).
 
-## Примеры
+## Examples
 
-Было:
+Before:
 ```
 https://example.com/article?id=12345&utm_source=telegram&si=abc#section
 ```
-Стало:
+After:
 ```
 https://example.com/article?id=12345#section
 ```
 
-Было:
+Before:
 ```
-Это был очень интерес-
-ный эксперимент.
+This was a very interes-
+ting experiment.
 ```
-Стало:
+After:
 ```
-Это был очень интересный эксперимент.
+This was a very interesting experiment.
 ```
 
-## Обработка бинарных данных
+## Handling non-text clipboard data
 
-Демон трогает буфер, только если там есть `CF_UNICODETEXT`
-(`IsClipboardFormatAvailable` перед любым чтением). Картинка,
-файлы из проводника, что угодно ещё без текстового представления --
-не читается и не изменяется вообще.
+The daemon only touches the clipboard when `CF_UNICODETEXT` is
+present (`IsClipboardFormatAvailable` before any read). An image,
+files from Explorer, anything else with no text representation --
+never read, never modified.
 
-Если в буфере одновременно и текст, и другие форматы (например,
-Excel кладёт вместе текст, HTML и картинку) -- при перезаписи текста
-остальные форматы **сохраняются**: `EmptyClipboard()` неизбежно
-чистит всё (это единственный способ стать владельцем буфера в
-Win32), поэтому перед этим все прочие GMEM-based форматы
-снимаются копией и возвращаются обратно после записи очищенного
-текста (`src/clipboard.c`, `snapshot_other_formats`). Не копируются
-только handle-based форматы (`CF_BITMAP`, `CF_METAFILEPICT`,
-`CF_ENHMETAFILE` и т.п.) -- они не лежат в глобальной памяти и не
-дублируются тем же способом; для них тоже сохранится дублируемое
-глобальной памятью представление (`CF_DIB`), если приложение-
-источник его предоставило (так делает подавляющее большинство).
+If the clipboard holds text alongside other formats at the same time
+(e.g. Excel puts text, HTML, and an image together), those other
+formats are **preserved** across the rewrite: `EmptyClipboard()`
+inevitably clears everything (it's the only way to take clipboard
+ownership in Win32), so before that, every other GMEM-based format is
+snapshotted and restored after the cleaned text is written (see
+`snapshot_other_formats` in `src/clipboard.c`). Handle-based formats
+(`CF_BITMAP`, `CF_METAFILEPICT`, `CF_ENHMETAFILE`, etc.) aren't
+GMEM-backed and can't be duplicated the same way, but a `CF_DIB`
+sibling -- which almost every source app also provides -- survives.
 
-## Установка
+## Install
 
-Скачайте `underbuffer.exe` из [Releases](../../releases) и запустите
--- он не показывает окон, сворачивается сразу в трей. Иконка в трее
--> правая кнопка -> Выход, если нужно остановить.
+Download `underbuffer.exe` from [Releases](../../releases) and run
+it -- no windows, it minimizes straight to the tray. Tray icon ->
+right click -> Exit to stop it.
 
-exe не подписан сертификатом (это опенсорс-утилита одного автора,
-а не коммерческий софт), поэтому при первом запуске Windows
-SmartScreen может показать предупреждение "Windows защитила ваш
-компьютер". Это нормально для несигнированных бинарников -- нажмите
-"Подробнее" -> "Выполнить в любом случае". Подробнее про сборку
-из исходников ниже, если предпочитаете не доверять чужому exe.
+The exe isn't code-signed (this is a one-person open-source utility,
+not commercial software), so on first run Windows SmartScreen may
+show "Windows protected your PC". That's expected for unsigned
+binaries -- click "More info" -> "Run anyway". See building from
+source below if you'd rather not trust someone else's exe.
 
-Автозапуск при входе в систему пока не настраивается автоматически
--- добавьте ярлык на exe в
-`shell:startup` (Win+R -> `shell:startup` -> Enter) вручную, если
-нужно.
+Auto-start on login isn't wired up automatically yet -- add a
+shortcut to the exe in `shell:startup` (Win+R -> `shell:startup` ->
+Enter) manually if you need it.
 
-## Сборка из исходников
+## Building from source
 
-См. [docs/BUILD.md](docs/BUILD.md).
+See [docs/BUILD.md](docs/BUILD.md).
 
-## Как это устроено
+## How it's built
 
-- `src/main.c` -- message-only окно, слушает `WM_CLIPBOARDUPDATE`,
-  трей-иконка.
-- `src/clipboard.c` -- чтение/запись буфера с защитой от гонок
-  (сверка `GetClipboardSequenceNumber` перед перезаписью) и от
-  рекурсии (свой же `SetClipboardData` не должен запускать себя же).
-- `src/detector_*.c` + `src/pipeline.c` -- обработка текста, чистые
-  функции `WCHAR* -> WCHAR*`, без обращений к буферу обмена --
-  из-за этого их можно тестировать нативно, без Windows (см. ниже).
-- `src/netcheck.c` -- опциональная асинхронная HEAD-проверка ссылки
-  через WinHTTP, не блокирует основной поток.
+- `src/main.c` -- message-only window, listens for
+  `WM_CLIPBOARDUPDATE`, tray icon.
+- `src/clipboard.c` -- clipboard read/write with race protection
+  (checks `GetClipboardSequenceNumber` before rewriting) and
+  anti-recursion (our own `SetClipboardData` must not trigger itself).
+- `src/detector_*.c` + `src/pipeline.c` -- text processing, pure
+  `WCHAR* -> WCHAR*` functions with no clipboard access -- which is
+  why they can be unit-tested natively, without Windows (see below).
+- `src/netcheck.c` -- optional async HEAD check over WinHTTP, doesn't
+  block the main thread.
 
-## Тесты
+## Tests
 
 ```bash
 make test
 ```
 
-Гоняет юнит-тесты детекторов нативным `gcc` (без mingw, без
-Windows) -- `tests/test_detectors.c` + `tests/compat/windows.h`
-(минимальная замена `<windows.h>` под линковку типов `WCHAR`/`BOOL`
-и пары CRT-функций). Быстрый цикл разработки: правите
-`src/detector_*.c` -> `make test` -> результат за секунды.
+Runs detector unit tests with native `gcc` (no mingw, no Windows) --
+`tests/test_detectors.c` + `tests/compat/windows.h` (a minimal stand-in
+for `<windows.h>` covering `WCHAR`/`BOOL` and a couple of CRT
+functions). Fast dev loop: edit `src/detector_*.c` -> `make test` ->
+results in seconds.
 
-Это не подменяет финальную проверку: `clipboard.c`/`main.c`/
-`netcheck.c` тестами не покрыты (реальная Win32-интеграция), финальная
-проверка -- собранный `make` exe, руками на Windows.
+This doesn't replace the final check: `clipboard.c`/`main.c`/
+`netcheck.c` aren't covered by these tests (real Win32 integration) --
+the final check is a `make`-built exe, run by hand on Windows.
 
 ```bash
 make stress
 ```
 
-Многопоточный прогон (16 потоков x 5000 итераций на общий набор
-кейсов, сверка результата) и churn-тест (200k циклов alloc/free на
-случайных строках) -- ловит гонки и утечки в детекторах/пайплайне
-раньше, чем они попадут на Windows. В CI дополнительно гоняется
-под Valgrind (`--leak-check=full`).
+Concurrency run (16 threads x 5000 iterations against a shared set of
+cases, output checked each time) and a churn test (200k alloc/free
+cycles over random strings) -- catches races and leaks in the
+detectors/pipeline before they reach Windows. CI also runs this under
+Valgrind (`--leak-check=full`).
 
 ## CI
 
-`.github/workflows/ci.yml`: на каждый push/PR -- `make test`,
-`make stress` (+ под Valgrind), затем сборка `underbuffer.exe`
-через mingw-w64, артефакт прикладывается к прогону.
+`.github/workflows/ci.yml`: every push/PR runs `make test`, `make
+stress` (plus under Valgrind), then builds `underbuffer.exe` with
+mingw-w64 and attaches it as a run artifact.
 
-## Лицензия
+## License
 
 [MIT](LICENSE).

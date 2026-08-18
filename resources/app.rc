@@ -1,14 +1,13 @@
 #include <winver.h>
 
 /*
- * Иконка. IDI_APP=1 -- тот же ID, что main.c грузит через
- * LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP)) для окна и трея.
+ * IDI_APP=1 matches what main.c loads via
+ * LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP)) for the window/tray.
  *
- * resources/icon.ico ДОЛЖЕН существовать до сборки -- .svg сам по
- * себе Win32-ресурсом быть не может, см. resources/README.md про
- * конвертацию. Если файла нет, windres просто упадёт с понятной
- * ошибкой "cannot open file" -- это ожидаемо и лучше, чем тихо
- * собрать exe без иконки.
+ * resources/icon.ico must exist before building -- an .svg can't be
+ * a Win32 resource by itself, see resources/README.md for conversion.
+ * Missing file makes windres fail with a clear error, which is better
+ * than silently building an exe with no icon.
  */
 #define IDI_APP 1
 IDI_APP ICON "icon.ico"

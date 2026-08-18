@@ -1,9 +1,9 @@
-# Сборка из исходников
+# Building from source
 
-## Требования
+## Requirements
 
-- WSL (Ubuntu/Debian) или Linux с кросс-компилятором для Windows.
-- `mingw-w64` (даёт `x86_64-w64-mingw32-gcc` и `-windres`).
+- WSL (Ubuntu/Debian) or Linux with a Windows cross-compiler.
+- `mingw-w64` (provides `x86_64-w64-mingw32-gcc` and `-windres`).
 - `make`.
 
 ```bash
@@ -11,7 +11,7 @@ sudo apt update
 sudo apt install -y mingw-w64
 ```
 
-## Сборка exe
+## Build
 
 ```bash
 git clone https://github.com/casablanque-code/underbuffer.git
@@ -19,53 +19,58 @@ cd underbuffer
 make
 ```
 
-Результат: `build/underbuffer.exe`. `make clean` перед пересборкой
-после `git pull`/применения патча -- полезная привычка, чтобы
-случайно не запустить старый бинарник (объектники в `build/` не
-отслеживаются git'ом, но пересобираются инкрементально по мейку).
+Output: `build/underbuffer.exe`. Run `make clean` before rebuilding
+after `git pull`/applying a patch -- cheap insurance against
+accidentally running a stale binary. Object files under `build/`
+aren't tracked by git but are rebuilt incrementally by make.
 
-Иконка (`resources/icon.ico`) опциональна: если файла нет, `make`
-выведет предупреждение и соберёт exe с системной иконкой по
-умолчанию. См. [resources/README.md](../resources/README.md) как
-получить `.ico` из `.svg`.
+The icon (`resources/icon.ico`) is optional: without it `make` prints
+a warning and builds with the default system icon. See
+[resources/README.md](../resources/README.md) for converting an
+`.svg` to `.ico`.
 
-## Запуск
+## Running
 
-Собранный `underbuffer.exe` -- чисто Win32-бинарник, копируется на
-Windows-машину и запускается там (двойным кликом или из PowerShell).
-Под WSL напрямую не запустится (нет GUI-подсистемы Windows и буфера
-обмена Windows изнутри WSL2 без доп. прослойки) -- только сборка тут,
-запуск и ручная проверка -- на Windows.
+`underbuffer.exe` is a plain Win32 binary -- copy it to a Windows
+machine and run it there (double-click or from PowerShell). It won't
+run directly under WSL (no Windows GUI subsystem, no access to the
+real Windows clipboard from inside WSL2 without extra tooling) --
+building happens here, running and manual verification happen on
+Windows.
 
-Если под рукой нет Windows, но нужно быстро прогнать бинарник --
-`wine build/underbuffer.exe` работает для базовой проверки (буфер
-обмена в Wine -- отдельная X11-реализация, не 1:1 с настоящим
-Windows-буфером, но детекторы и message loop проверить достаточно).
+If you don't have Windows handy, `wine build/underbuffer.exe` works
+for a basic smoke test (Wine's clipboard is a separate X11
+implementation, not 1:1 with the real Windows clipboard, but good
+enough to check the detectors and the message loop).
 
-## Тесты детекторов (без mingw, без Windows)
+## Detector tests (no mingw, no Windows)
 
 ```bash
 make test
+make stress
 ```
 
-Использует обычный системный `gcc` и `tests/compat/windows.h`
-(шим вместо настоящего `<windows.h>`) -- быстрее, чем гонять полную
-сборку и руками копировать exe на Windows при каждой правке
-`src/detector_*.c`. Не покрывает `clipboard.c`/`main.c`/`netcheck.c`
--- это Win32-интеграция, её всё равно проверяем реальным `make` +
-ручным запуском на Windows перед релизом.
+`make test` uses the system `gcc` and `tests/compat/windows.h` (a
+shim standing in for `<windows.h>`) -- faster than a full mingw build
+plus manual copy to Windows on every `src/detector_*.c` edit. Doesn't
+cover `clipboard.c`/`main.c`/`netcheck.c` -- that's real Win32
+integration, verified with an actual `make` build and a manual run on
+Windows before release.
 
-## Частые проблемы
+`make stress` runs concurrency and alloc/free-churn stress tests
+against the same detector code; see the root README for details.
 
-- **`x86_64-w64-mingw32-gcc: command not found`** -- не установлен
-  `mingw-w64` (см. "Требования" выше).
-- **Тесты падают на `CP_UTF8 undeclared` или похожем** -- значит
-  какой-то `.c`-файл из `TEST_SRC` в `Makefile` тянет настоящий
-  `<windows.h>`-вызов, которого нет в `tests/compat/windows.h`.
-  Детекторы (`detector_*.c`, `pipeline.c`) обязаны оставаться чистой
-  логикой без Win32-вызовов -- если такой вызов появился, это
-  архитектурная ошибка, а не повод дополнять шим.
-- **Собрал, но на Windows видно старое поведение** -- почти всегда
-  это стейл-бинарник: `make clean && make`, и убедитесь, что
-  копируете именно свежий `build/underbuffer.exe`, а не старую копию
-  откуда-то ещё.
+## Common issues
+
+- **`x86_64-w64-mingw32-gcc: command not found`** -- `mingw-w64` isn't
+  installed (see Requirements above).
+- **Tests fail with `CP_UTF8 undeclared` or similar** -- some `.c`
+  file in `TEST_SRC` (Makefile) is pulling in a real `<windows.h>`
+  call that isn't in `tests/compat/windows.h`. Detectors
+  (`detector_*.c`, `pipeline.c`) are meant to stay pure logic with no
+  Win32 calls -- if one crept in, that's an architecture regression,
+  not a reason to extend the shim.
+- **Built it, but Windows still shows the old behavior** -- almost
+  always a stale binary: `make clean && make`, and make sure you're
+  copying the freshly built `build/underbuffer.exe`, not an old copy
+  from somewhere else.

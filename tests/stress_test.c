@@ -17,7 +17,7 @@ static const case_t CASES[] = {
       L"example" },
     { L"{\"a\":1,\"b\":[1,2,3]}",
       L"{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2,\n    3\n  ]\n}" },
-    { L"\x421\x43c\x43e\x442\x440\x438-\n\x432\x43e\x442", /* Смотри-\nвот */
+    { L"\x421\x43c\x43e\x442\x440\x438-\n\x432\x43e\x442", /* Cyrillic hyphen-break test case */
       NULL }, /* checked separately below, contains no tracker/json */
     { L"plain unchanged text, nothing to do here", NULL },
 };
