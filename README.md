@@ -202,8 +202,11 @@ mingw-w64 and attaches it as a run artifact.
 
 - `clipboard.c` (the actual Win32 read/write, race protection, format
   preservation) has no automated test coverage -- only manual
-  verification on real Windows. A `windows-latest` CI job exercising
-  the real clipboard API is the natural next step; not done yet.
+  verification on real Windows. This is not hypothetical: a real
+  infinite-loop bug (self-write detection racing against the netcheck
+  revert running on a worker thread) shipped and only got caught by
+  manual testing. A `windows-latest` CI job exercising the real
+  clipboard API is the natural next step; not done yet.
 - Tracker param list and revert threshold (4xx/5xx) are still fixed
   in code, not configurable -- only the extra-tracker list and
   netcheck timing are, via `config.ini`.

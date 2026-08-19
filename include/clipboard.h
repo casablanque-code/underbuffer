@@ -3,9 +3,20 @@
 
 #include <windows.h>
 
-/* Set by ub_clipboard_write_if_fresh() around its own writes so the
- * resulting WM_CLIPBOARDUPDATE can be recognized and ignored. */
-extern volatile LONG g_is_internal_update;
+/* Call at the top of the WM_CLIPBOARDUPDATE handler. Returns TRUE if
+ * the current clipboard content is the result of our own most recent
+ * write via ub_clipboard_write_if_fresh(), on ANY thread -- including
+ * the netcheck revert, which runs on a worker thread, not the main
+ * thread. Compares actual clipboard sequence numbers rather than a
+ * before/after boolean flag: a flag toggled around the write on a
+ * background thread can flip back to "off" before the main thread
+ * even gets to dispatch the resulting WM_CLIPBOARDUPDATE, since
+ * nothing guarantees ordering between "another thread finishes a
+ * write" and "the main thread's message loop processes the message
+ * that write triggered". Sequence numbers don't have that race: they
+ * only change on real clipboard writes, and comparing them works no
+ * matter which thread wrote or how delayed message dispatch is. */
+BOOL ub_clipboard_is_own_update(void);
 
 /* Reads CF_UNICODETEXT. Returns malloc'd string (caller frees), or
  * NULL if the clipboard holds no text (image, files, empty, busy).

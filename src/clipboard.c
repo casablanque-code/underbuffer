@@ -1,7 +1,16 @@
 #include "clipboard.h"
 #include <stdlib.h>
 
-volatile LONG g_is_internal_update = 0;
+/* -1 (0xFFFFFFFF as a sequence number) never matches a real clipboard
+ * sequence in practice -- safe "no self-write yet" sentinel. */
+static volatile LONG g_last_self_write_seq = -1;
+
+BOOL ub_clipboard_is_own_update(void)
+{
+    LONG current = (LONG)GetClipboardSequenceNumber();
+    LONG last_self = InterlockedCompareExchange(&g_last_self_write_seq, 0, 0);
+    return current == last_self;
+}
 
 #define MAX_PRESERVED_FORMATS 32
 
@@ -146,8 +155,6 @@ BOOL ub_clipboard_write_if_fresh(HWND owner, const WCHAR *text, DWORD expected_s
     preserved_fmt_t preserved[MAX_PRESERVED_FORMATS];
     int preserved_count = snapshot_other_formats(preserved, MAX_PRESERVED_FORMATS);
 
-    InterlockedExchange(&g_is_internal_update, 1);
-
     EmptyClipboard();
     BOOL ok = (SetClipboardData(CF_UNICODETEXT, hMem) != NULL);
     if (!ok) {
@@ -161,7 +168,14 @@ BOOL ub_clipboard_write_if_fresh(HWND owner, const WCHAR *text, DWORD expected_s
     }
 
     CloseClipboard();
-    InterlockedExchange(&g_is_internal_update, 0);
+
+    /* Record the sequence number our write produced -- not a
+     * before/after flag. See ub_clipboard_is_own_update() for why
+     * this matters when the write happens on a background thread
+     * (the netcheck revert), not just the main thread. */
+    if (ok) {
+        InterlockedExchange(&g_last_self_write_seq, (LONG)GetClipboardSequenceNumber());
+    }
 
     return ok;
 }

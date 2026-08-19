@@ -24,8 +24,8 @@ static BOOL looks_like_bare_url(const WCHAR *s)
 
 static void handle_clipboard_update(HWND hwnd)
 {
-    /* Ignore updates caused by our own write. */
-    if (InterlockedCompareExchange(&g_is_internal_update, 0, 0) != 0) {
+    /* Ignore updates caused by our own write (sync or async revert). */
+    if (ub_clipboard_is_own_update()) {
         return;
     }
 
