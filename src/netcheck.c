@@ -24,6 +24,7 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
     netcheck_ctx_t *ctx = (netcheck_ctx_t *)param;
     BOOL succeeded = FALSE;
     DWORD status = 0;
+    DWORD last_error = 0;
 
     URL_COMPONENTS uc = { 0 };
     uc.dwStructSize = sizeof(uc);
@@ -35,21 +36,27 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
     uc.dwUrlPathLength = ARRAYSIZE(path);
 
     if (!WinHttpCrackUrl(ctx->cleaned_url, 0, 0, &uc)) {
-        ub_log(L"netcheck: WinHttpCrackUrl failed for %s (err=%lu)", ctx->cleaned_url, GetLastError());
+        last_error = GetLastError();
+        ub_log(L"netcheck: WinHttpCrackUrl failed for %s (err=%lu)", ctx->cleaned_url, last_error);
         goto decide;
     }
 
     HINTERNET hSession = WinHttpOpen(L"UnderBuffer/0.2",
                                       WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hSession) { ub_log(L"netcheck: WinHttpOpen failed"); goto decide; }
+    if (!hSession) {
+        last_error = GetLastError();
+        ub_log(L"netcheck: WinHttpOpen failed (err=%lu)", last_error);
+        goto decide;
+    }
 
     WinHttpSetTimeouts(hSession, (int)ctx->timeout_ms, (int)ctx->timeout_ms,
                         (int)ctx->timeout_ms, (int)ctx->timeout_ms);
 
     HINTERNET hConnect = WinHttpConnect(hSession, uc.lpszHostName, uc.nPort, 0);
     if (!hConnect) {
-        ub_log(L"netcheck: WinHttpConnect failed");
+        last_error = GetLastError();
+        ub_log(L"netcheck: WinHttpConnect failed for %s (err=%lu)", ctx->cleaned_url, last_error);
         WinHttpCloseHandle(hSession);
         goto decide;
     }
@@ -59,7 +66,8 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
                                              NULL, WINHTTP_NO_REFERER,
                                              WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) {
-        ub_log(L"netcheck: WinHttpOpenRequest failed");
+        last_error = GetLastError();
+        ub_log(L"netcheck: WinHttpOpenRequest failed for %s (err=%lu)", ctx->cleaned_url, last_error);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         goto decide;
@@ -73,9 +81,12 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
                                  WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_len,
                                  WINHTTP_NO_HEADER_INDEX)) {
             succeeded = TRUE;
+        } else {
+            last_error = GetLastError();
         }
     } else {
-        ub_log(L"netcheck: request failed for %s (err=%lu)", ctx->cleaned_url, GetLastError());
+        last_error = GetLastError();
+        ub_log(L"netcheck: request failed for %s (err=%lu)", ctx->cleaned_url, last_error);
     }
 
     WinHttpCloseHandle(hRequest);
@@ -83,19 +94,22 @@ static DWORD WINAPI netcheck_thread(LPVOID param)
     WinHttpCloseHandle(hSession);
 
 decide:
-    if (ub_netcheck_should_revert(succeeded, status)) {
+    if (ub_netcheck_should_revert(succeeded, status, last_error)) {
         BOOL reverted = ub_clipboard_write_if_fresh(ctx->owner, ctx->original_text, ctx->seq_after_write);
+        const WCHAR *reason = succeeded ? L"HTTP error" : L"host does not resolve";
         if (reverted) {
-            ub_log(L"netcheck: %s -> HTTP %lu, reverted clipboard to original (tracked params may be required)",
-                    ctx->cleaned_url, status);
+            ub_log(L"netcheck: %s -> %s (status=%lu err=%lu), reverted clipboard to original "
+                    L"(tracked params may be required)",
+                    ctx->cleaned_url, reason, status, last_error);
         } else {
-            ub_log(L"netcheck: %s -> HTTP %lu, wanted to revert but clipboard changed since (stale seq)",
-                    ctx->cleaned_url, status);
+            ub_log(L"netcheck: %s -> %s, wanted to revert but clipboard changed since (stale seq)",
+                    ctx->cleaned_url, reason);
         }
     } else if (succeeded) {
         ub_log(L"netcheck: %s -> HTTP %lu, ok", ctx->cleaned_url, status);
     } else {
-        ub_log(L"netcheck: %s -> request failed, link status unknown, keeping cleaned version", ctx->cleaned_url);
+        ub_log(L"netcheck: %s -> request failed (err=%lu), link status unknown, keeping cleaned version",
+                ctx->cleaned_url, last_error);
     }
 
     free(ctx->cleaned_url);

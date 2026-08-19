@@ -371,26 +371,37 @@ static void test_url_extra_tracker_from_config_gets_stripped(void)
 
 static void test_netcheck_reverts_on_4xx(void)
 {
-    check_true("netcheck: reverts on 404", ub_netcheck_should_revert(TRUE, 404));
+    check_true("netcheck: reverts on 404", ub_netcheck_should_revert(TRUE, 404, 0));
 }
 
 static void test_netcheck_reverts_on_5xx(void)
 {
-    check_true("netcheck: reverts on 500", ub_netcheck_should_revert(TRUE, 500));
+    check_true("netcheck: reverts on 500", ub_netcheck_should_revert(TRUE, 500, 0));
 }
 
 static void test_netcheck_keeps_on_2xx(void)
 {
-    check_false("netcheck: keeps cleaned link on 200", ub_netcheck_should_revert(TRUE, 200));
+    check_false("netcheck: keeps cleaned link on 200", ub_netcheck_should_revert(TRUE, 200, 0));
 }
 
-static void test_netcheck_keeps_on_request_failure(void)
+static void test_netcheck_reverts_on_dns_failure(void)
 {
-    /* Timeout/DNS/connection failure is ambiguous -- could be a flaky
+    /* A specific hostname not resolving is a strong signal the URL
+     * itself is wrong -- unlike a timeout, this is rarely transient. */
+    check_true("netcheck: reverts when the hostname doesn't resolve",
+               ub_netcheck_should_revert(FALSE, 0, UB_ERROR_WINHTTP_NAME_NOT_RESOLVED));
+}
+
+static void test_netcheck_keeps_on_timeout_or_connection_failure(void)
+{
+    /* Timeout/connection-refused/etc is ambiguous -- could be a flaky
      * network, not evidence the stripped params were needed. Revert
-     * only on a definitive bad-status response. */
-    check_false("netcheck: does not revert on a failed request (timeout/DNS/etc)",
-                ub_netcheck_should_revert(FALSE, 0));
+     * only on a definitive bad-status response or a confirmed DNS
+     * failure (see above). */
+    check_false("netcheck: does not revert on a timeout",
+                ub_netcheck_should_revert(FALSE, 0, 12002 /* ERROR_WINHTTP_TIMEOUT */));
+    check_false("netcheck: does not revert on connection refused",
+                ub_netcheck_should_revert(FALSE, 0, 12029 /* ERROR_WINHTTP_CANNOT_CONNECT */));
 }
 
 /* ---- pipeline (integration) ---- */
@@ -461,7 +472,8 @@ int main(void)
     test_netcheck_reverts_on_4xx();
     test_netcheck_reverts_on_5xx();
     test_netcheck_keeps_on_2xx();
-    test_netcheck_keeps_on_request_failure();
+    test_netcheck_reverts_on_dns_failure();
+    test_netcheck_keeps_on_timeout_or_connection_failure();
 
     test_pipeline_json_passthrough();
     test_pipeline_wrapped_url_with_softwrap();

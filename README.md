@@ -25,12 +25,13 @@ No windows, no UI on top of the system -- runs from the tray.
 No network on the critical path: text processing is entirely local
 and synchronous. An optional background (non-blocking) link
 availability check runs after the fact -- if the cleaned link turns
-out to be broken (a definitive HTTP 4xx/5xx, not just a flaky
-network), the clipboard is automatically reverted to the original,
-uncleaned text. Some links only work with specific tracking params
-attached; this way stripping them never silently breaks the link you
-meant to share. See [Configuration](#configuration) to disable this
-or tune the timeout.
+out to be broken (a definitive HTTP 4xx/5xx, or the hostname not
+resolving at all -- not just a generic timeout, which is too
+ambiguous to act on), the clipboard is automatically reverted to the
+original, uncleaned text. Some links only work with specific tracking
+params attached; this way stripping them never silently breaks the
+link you meant to share. See [Configuration](#configuration) to
+disable this or tune the timeout.
 
 There's **no base64/URL-decode detector on purpose** -- too easy to
 accidentally decode and expose something that was copied deliberately
