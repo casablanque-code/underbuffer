@@ -172,7 +172,11 @@ Concurrency run (16 threads x 5000 iterations against a shared set of
 cases, output checked each time) and a churn test (200k alloc/free
 cycles over random strings) -- catches races and leaks in the
 detectors/pipeline before they reach Windows. CI also runs this under
-Valgrind (`--leak-check=full`).
+Valgrind (`--leak-check=full`), scaled down via `UB_STRESS_LIGHT=1`
+(200 iterations/thread, 20k churn) -- Valgrind serializes threads
+under its own scheduler and adds heavy per-instruction overhead, so
+the full volume can take many minutes there for no extra coverage per
+iteration.
 
 ## CI
 

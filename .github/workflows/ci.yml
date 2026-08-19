@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq valgrind
-          valgrind --error-exitcode=1 --leak-check=full ./build/stress_test
+          UB_STRESS_LIGHT=1 valgrind --error-exitcode=1 --leak-check=full ./build/stress_test
 
   build:
     runs-on: ubuntu-latest

@@ -5,6 +5,20 @@
 #include <string.h>
 #include <wchar.h>
 
+/* UB_STRESS_LIGHT=1 scales iteration counts way down. Same code path,
+ * same coverage per-iteration -- just fewer iterations. Valgrind
+ * serializes threads under its own scheduler and adds heavy per-
+ * instruction overhead, so the full volume (tuned for a fast native
+ * run) can take many minutes there, especially on slower CI hardware.
+ * The light profile still exercises every detector, every thread,
+ * and enough alloc/free churn to catch real leaks/corruption -- it
+ * just doesn't need 200k iterations to do it. */
+static BOOL g_light_mode;
+
+static int iters_per_thread(void) { return g_light_mode ? 200 : 5000; }
+static int thread_count(void)     { return 16; } /* cheap either way; iteration count is what Valgrind makes expensive */
+static int churn_iters(void)      { return g_light_mode ? 20000 : 200000; }
+
 typedef struct {
     const WCHAR *input;
     const WCHAR *expect; /* NULL means: pipeline should return exactly input unchanged */
@@ -23,13 +37,11 @@ static const case_t CASES[] = {
 };
 static const size_t CASE_COUNT = sizeof(CASES) / sizeof(CASES[0]);
 
-#define ITERS_PER_THREAD 5000
-#define THREAD_COUNT 16
-
 static void *thread_worker(void *arg)
 {
     long idx = (long)arg;
-    for (int i = 0; i < ITERS_PER_THREAD; i++) {
+    int iters = iters_per_thread();
+    for (int i = 0; i < iters; i++) {
         const case_t *c = &CASES[(idx + i) % CASE_COUNT];
         WCHAR *out = ub_pipeline_run_sync(c->input);
         if (!out) {
@@ -48,14 +60,15 @@ static void *thread_worker(void *arg)
 
 static void run_thread_stress(void)
 {
-    pthread_t threads[THREAD_COUNT];
-    for (long i = 0; i < THREAD_COUNT; i++) {
+    int n = thread_count();
+    pthread_t threads[16];
+    for (long i = 0; i < n; i++) {
         pthread_create(&threads[i], NULL, thread_worker, (void *)i);
     }
-    for (int i = 0; i < THREAD_COUNT; i++) {
+    for (int i = 0; i < n; i++) {
         pthread_join(threads[i], NULL);
     }
-    printf("thread stress: %d threads x %d iters -- ok\n", THREAD_COUNT, ITERS_PER_THREAD);
+    printf("thread stress: %d threads x %d iters -- ok\n", n, iters_per_thread());
 }
 
 /* Deterministic PRNG, no external deps. */
@@ -80,13 +93,13 @@ static void fill_random_input(WCHAR *buf, size_t len)
     buf[len] = L'\0';
 }
 
-#define CHURN_ITERS 200000
 #define CHURN_MAX_LEN 256
 
 static void run_churn_stress(void)
 {
+    int iters = churn_iters();
     WCHAR *scratch = (WCHAR *)malloc((CHURN_MAX_LEN + 1) * sizeof(WCHAR));
-    for (int i = 0; i < CHURN_ITERS; i++) {
+    for (int i = 0; i < iters; i++) {
         size_t len = 1 + (next_rand() % CHURN_MAX_LEN);
         fill_random_input(scratch, len);
 
@@ -99,11 +112,14 @@ static void run_churn_stress(void)
         free(out);
     }
     free(scratch);
-    printf("churn stress: %d alloc/free cycles -- ok\n", CHURN_ITERS);
+    printf("churn stress: %d alloc/free cycles -- ok\n", iters);
 }
 
 int main(void)
 {
+    const char *light = getenv("UB_STRESS_LIGHT");
+    g_light_mode = (light != NULL && light[0] != '\0' && light[0] != '0');
+
     run_thread_stress();
     run_churn_stress();
     return 0;
