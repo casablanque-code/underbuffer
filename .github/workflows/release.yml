@@ -21,14 +21,8 @@ jobs:
       - name: Stress tests
         run: make stress
 
-      - name: Stress tests under Valgrind
-        timeout-minutes: 5
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update -qq -o Acquire::Retries=3
-          sudo apt-get install -y -qq valgrind
-          UB_STRESS_LIGHT=1 valgrind --error-exitcode=1 --leak-check=full ./build/stress_test
+      - name: Stress tests under ASan/UBSan
+        run: make stress-asan
 
   release:
     runs-on: ubuntu-latest

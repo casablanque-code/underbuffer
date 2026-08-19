@@ -171,17 +171,30 @@ make stress
 Concurrency run (16 threads x 5000 iterations against a shared set of
 cases, output checked each time) and a churn test (200k alloc/free
 cycles over random strings) -- catches races and leaks in the
-detectors/pipeline before they reach Windows. CI also runs this under
-Valgrind (`--leak-check=full`), scaled down via `UB_STRESS_LIGHT=1`
-(200 iterations/thread, 20k churn) -- Valgrind serializes threads
-under its own scheduler and adds heavy per-instruction overhead, so
-the full volume can take many minutes there for no extra coverage per
-iteration.
+detectors/pipeline before they reach Windows.
+
+```bash
+make stress-asan
+```
+
+The same stress binary rebuilt with AddressSanitizer + UBSan
+(`-fsanitize=address,undefined`) -- catches use-after-free, buffer
+overflows, and undefined behavior, with an exact stack trace pointing
+at the allocation, the free, and the bad access. This is what CI
+runs. It replaced an earlier Valgrind-based step: Valgrind needed
+`apt-get install` over the network on every single run (a real,
+repeated source of CI hangs when the mirror was slow or flaky), and
+serializes threads under its own scheduler, which turned the
+16-thread run into minutes instead of seconds. ASan/UBSan are built
+into gcc -- nothing to install, and the full-volume run above takes
+about 4 seconds. `UB_STRESS_LIGHT=1 ./build/stress_test` still works
+if you want to run the old plain build under Valgrind locally for
+some reason (e.g. tracking down something ASan doesn't model well).
 
 ## CI
 
 `.github/workflows/ci.yml`: every push/PR runs `make test`, `make
-stress` (plus under Valgrind), then builds `underbuffer.exe` with
+stress`, `make stress-asan`, then builds `underbuffer.exe` with
 mingw-w64 and attaches it as a run artifact.
 
 ## Known gaps

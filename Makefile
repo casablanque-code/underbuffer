@@ -61,4 +61,18 @@ stress: build
 	$(TEST_CC) $(TEST_FLAGS) $(STRESS_SRC) -o $(STRESS_BIN) -lpthread
 	./$(STRESS_BIN)
 
-.PHONY: all clean test stress
+# ASan/UBSan build of the same stress binary -- catches use-after-free,
+# buffer overflows, leaks, and undefined behavior at near-native speed,
+# with zero extra packages to install (both are built into gcc). This
+# replaced a Valgrind-based CI step: Valgrind needed `apt-get install`
+# over the network on every run (a real, repeated source of CI hangs)
+# and serializes threads under its own scheduler, which made the
+# 16-thread stress run take minutes instead of seconds.
+ASAN_BIN   := build/stress_test_asan
+ASAN_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+
+stress-asan: build
+	$(TEST_CC) $(TEST_FLAGS) $(ASAN_FLAGS) $(STRESS_SRC) -o $(ASAN_BIN) -lpthread
+	./$(ASAN_BIN)
+
+.PHONY: all clean test stress stress-asan
